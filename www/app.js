@@ -6,6 +6,9 @@ class VoiceAssistantWidget {
         this.isListening = false;
         this.isProcessing = false;
         this.wakeWordEnabled = false;
+        this.authFailed = false;
+        this.connectionSuccessful = false;
+        this.authResolved = false;
         this.wsConnection = null;
         this.mediaRecorder = null;
         this.audioContext = null;
@@ -264,13 +267,20 @@ class VoiceAssistantWidget {
     }
     
     async connectWebSocket() {
+        this.authResolved = false;
         return new Promise((resolve, reject) => {
-            const wsUrl = `ws://localhost:8099/ws/ha`;
+            // Use the same host as the page, not hardcoded localhost
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/ha`;
+            console.log('Connecting to WebSocket:', wsUrl);
             
             this.wsConnection = new WebSocket(wsUrl);
-            
+            window.webSocket = this.wsConnection; // Expose WebSocket globally for testing
+
             this.wsConnection.onopen = () => {
                 console.log('WebSocket connected');
+                console.log('Attempting to hide connection overlay');
+                this.elements.connectionOverlay.classList.add('hidden');
             };
             
             this.wsConnection.onmessage = async (event) => {
@@ -291,12 +301,19 @@ class VoiceAssistantWidget {
                 console.log('WebSocket closed');
                 this.updateConnectionStatus(false);
                 
-                // Attempt reconnection after 5 seconds
-                setTimeout(() => {
-                    if (this.config.haUrl && this.config.accessToken) {
-                        this.connect();
-                    }
-                }, 5000);
+                if (!this.authResolved) {
+                    reject(new Error('WebSocket closed before authentication response'));
+                    this.authResolved = true;
+                }
+                
+                // Attempt reconnection after 5 seconds if previously connected and auth didn't fail
+                if (this.connectionSuccessful && !this.authFailed) {
+                    setTimeout(() => {
+                        if (this.config.haUrl && this.config.accessToken) {
+                            this.connect();
+                        }
+                    }, 5000);
+                }
             };
         });
     }
@@ -305,16 +322,24 @@ class VoiceAssistantWidget {
         console.log('Received WebSocket message:', message);
         switch (message.type) {
             case 'auth_required':
-                console.log('Auth already sent by server');
+                console.log('Sending auth to HA WebSocket');
+                this.wsConnection.send(JSON.stringify({
+                    type: 'auth',
+                    access_token: this.config.accessToken
+                }));
                 break;
                 
             case 'auth_ok':
                 console.log('WebSocket authenticated');
+                this.authFailed = false;
+                this.authResolved = true;
                 if (resolveConnect) resolveConnect();
                 break;
                 
             case 'auth_invalid':
                 console.error('WebSocket auth failed:', message.message);
+                this.authFailed = true;
+                this.authResolved = true;
                 if (rejectConnect) rejectConnect(new Error(message.message));
                 break;
                 
@@ -329,6 +354,13 @@ class VoiceAssistantWidget {
     }
     
     handleResult(message) {
+        // Check if this is a pipeline run result with runner_data
+        if (message.id === this.pipelineSubscriptionId && message.success) {
+            // This is the initial pipeline run response
+            console.log('Pipeline started:', message.result);
+            // The runner_data comes in the run-start event, not the result
+        }
+        
         const pending = this.pendingPromises.get(message.id);
         if (pending) {
             if (message.success) {
@@ -338,21 +370,47 @@ class VoiceAssistantWidget {
             }
             this.pendingPromises.delete(message.id);
         }
+        
+        // Handle pipeline run errors
+        if (message.id === this.pipelineSubscriptionId && !message.success) {
+            console.error('Pipeline run error:', message.error);
+            this.stopListening();
+            this.displayResponse('Pipeline error: ' + (message.error?.message || 'Unknown error'));
+            this.updateStatus('Error', 'connected');
+        }
     }
     
     handleEvent(message) {
         const event = message.event;
+        console.log('Pipeline event:', event.type, event);
         
         if (event.type === 'run-start') {
-            this.updateStatus('Processing...', 'processing');
+            // Extract the binary handler ID for audio streaming
+            if (event.data?.runner_data?.stt_binary_handler_id !== undefined) {
+                this.sttBinaryHandlerId = event.data.runner_data.stt_binary_handler_id;
+                console.log('STT binary handler ID:', this.sttBinaryHandlerId);
+            }
+            this.updateStatus('Pipeline started...', 'processing');
         } else if (event.type === 'run-end') {
+            this.isProcessing = false;
+            this.stopListening();
+            this.stopAudioStreaming();
             this.updateStatus('Ready', 'connected');
         } else if (event.type === 'stt-start') {
+            console.log('STT started with engine:', event.data?.engine);
             this.updateStatus('Listening...', 'listening');
+        } else if (event.type === 'stt-vad-start') {
+            console.log('Voice activity detected');
+            this.updateStatus('Hearing you...', 'listening');
+        } else if (event.type === 'stt-vad-end') {
+            console.log('Voice activity ended');
+            this.updateStatus('Processing speech...', 'processing');
         } else if (event.type === 'stt-end') {
             if (event.data?.stt_output?.text) {
+                console.log('STT result:', event.data.stt_output.text);
                 this.elements.transcriptText.textContent = event.data.stt_output.text;
             }
+            this.stopAudioStreaming();
         } else if (event.type === 'intent-start') {
             this.updateStatus('Understanding...', 'processing');
         } else if (event.type === 'intent-end') {
@@ -368,8 +426,11 @@ class VoiceAssistantWidget {
             }
         } else if (event.type === 'error') {
             console.error('Pipeline error:', event.data);
+            this.isProcessing = false;
+            this.stopListening();
+            this.stopAudioStreaming();
             this.displayResponse('Sorry, an error occurred: ' + (event.data?.message || 'Unknown error'));
-            this.updateStatus('Error', 'connected');
+            this.updateStatus('Error - ' + (event.data?.code || 'unknown'), 'connected');
         }
     }
     
@@ -397,16 +458,8 @@ class VoiceAssistantWidget {
     
     async getAssistPipelines() {
         try {
-            const response = await fetch('/api/ha/assist/pipelines');
-            if (response.status === 404) {
-                console.log('Assist pipelines not available (404), using default');
-                this.config.pipelineId = 'default';
-                return;
-            }
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            const result = await response.json();
+            // Use WebSocket command to get pipelines
+            const result = await this.sendMessage('assist_pipeline/pipeline/list');
             console.log('Available pipelines:', result);
             
             if (result.pipelines && result.pipelines.length > 0) {
@@ -415,16 +468,18 @@ class VoiceAssistantWidget {
                 this.config.pipelineId = preferred ? preferred.id : result.pipelines[0].id;
                 console.log('Using pipeline:', this.config.pipelineId);
             } else {
-                this.config.pipelineId = 'default';
+                console.log('No pipelines found, will use default');
+                this.config.pipelineId = null;
             }
         } catch (error) {
             console.error('Failed to get pipelines:', error);
-            this.config.pipelineId = 'default';
+            this.config.pipelineId = null;
         }
     }
     
     updateConnectionStatus(connected) {
         this.isConnected = connected;
+        this.connectionSuccessful = connected;
         
         if (connected) {
             this.elements.statusDot.classList.add('connected');
@@ -516,16 +571,57 @@ class VoiceAssistantWidget {
     
     async runAssistPipeline() {
         try {
-            // Create an audio worklet or use MediaRecorder
+            // Subscribe to pipeline events
+            this.pipelineSubscriptionId = ++this.messageId;
+            this.sttBinaryHandlerId = null;
+            
+            // Create the pipeline run request
+            const pipelineRequest = {
+                id: this.pipelineSubscriptionId,
+                type: 'assist_pipeline/run',
+                start_stage: 'stt',
+                end_stage: 'tts',
+                input: {
+                    sample_rate: 16000
+                }
+            };
+            
+            // Add pipeline ID if available
+            if (this.config.pipelineId) {
+                pipelineRequest.pipeline = this.config.pipelineId;
+            }
+            
+            // Set up handler for pipeline events
+            this.pendingPipelineEvents = new Promise((resolve, reject) => {
+                this.pipelineResolve = resolve;
+                this.pipelineReject = reject;
+            });
+            
+            console.log('Starting assist pipeline:', pipelineRequest);
+            this.wsConnection.send(JSON.stringify(pipelineRequest));
+            
+            // Start capturing audio and sending it
+            await this.startAudioStreaming();
+            
+        } catch (error) {
+            console.error('Pipeline error:', error);
+            this.stopListening();
+            this.displayResponse('Sorry, there was an error starting the voice pipeline: ' + error.message);
+        }
+    }
+    
+    async startAudioStreaming() {
+        try {
             const audioContext = new AudioContext({ sampleRate: 16000 });
+            this.activeAudioContext = audioContext;
             const source = audioContext.createMediaStreamSource(this.audioStream);
             
-            // Use ScriptProcessor for audio data (fallback for wider compatibility)
+            // Use ScriptProcessor for audio data
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            const audioChunks = [];
+            this.audioProcessor = processor;
             
             processor.onaudioprocess = (e) => {
-                if (!this.isListening) return;
+                if (!this.isListening || this.sttBinaryHandlerId === null) return;
                 
                 const inputData = e.inputBuffer.getChannelData(0);
                 // Convert to 16-bit PCM
@@ -533,7 +629,17 @@ class VoiceAssistantWidget {
                 for (let i = 0; i < inputData.length; i++) {
                     pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
                 }
-                audioChunks.push(pcmData);
+                
+                // Create binary message: handler_id byte + audio data
+                const buffer = new ArrayBuffer(1 + pcmData.byteLength);
+                const view = new Uint8Array(buffer);
+                view[0] = this.sttBinaryHandlerId;
+                view.set(new Uint8Array(pcmData.buffer), 1);
+                
+                // Send binary audio data over WebSocket
+                if (this.wsConnection && this.wsConnection.readyState === WebSocket.OPEN) {
+                    this.wsConnection.send(buffer);
+                }
                 
                 // Reset timeout on audio activity
                 this.lastInteractionTime = Date.now();
@@ -545,22 +651,38 @@ class VoiceAssistantWidget {
             // Set timeout to stop after period of silence
             this.sttTimeout = setInterval(() => {
                 if (Date.now() - this.lastInteractionTime > this.config.sttTimeout * 1000) {
-                    this.processAudio(audioChunks, audioContext);
+                    console.log('STT timeout reached, stopping audio stream');
+                    this.stopAudioStreaming();
                     clearInterval(this.sttTimeout);
                 }
             }, 1000);
             
-            // Also stop after max time
-            setTimeout(() => {
-                if (this.isListening) {
-                    this.processAudio(audioChunks, audioContext);
-                }
-            }, this.config.sttTimeout * 1000);
-            
         } catch (error) {
-            console.error('Pipeline error:', error);
-            this.stopListening();
+            console.error('Audio streaming error:', error);
+            throw error;
         }
+    }
+    
+    stopAudioStreaming() {
+        // Send end-of-audio signal (single byte with handler ID)
+        if (this.sttBinaryHandlerId !== null && this.wsConnection && this.wsConnection.readyState === WebSocket.OPEN) {
+            const endSignal = new Uint8Array([this.sttBinaryHandlerId]);
+            this.wsConnection.send(endSignal);
+            console.log('Sent end-of-audio signal');
+        }
+        
+        // Clean up audio processor
+        if (this.audioProcessor) {
+            this.audioProcessor.disconnect();
+            this.audioProcessor = null;
+        }
+        
+        if (this.activeAudioContext) {
+            this.activeAudioContext.close();
+            this.activeAudioContext = null;
+        }
+        
+        this.sttBinaryHandlerId = null;
     }
     
     async processAudio(audioChunks, audioContext) {
@@ -628,7 +750,12 @@ class VoiceAssistantWidget {
     
     async sendTextInput() {
         const text = this.elements.textInput.value.trim();
-        if (!text || !this.isConnected) return;
+        if (!text) return;
+        
+        if (!this.isConnected) {
+            this.displayResponse('Not connected to Home Assistant. Please wait for connection.');
+            return;
+        }
         
         this.elements.textInput.value = '';
         this.elements.transcriptText.textContent = text;
@@ -636,32 +763,32 @@ class VoiceAssistantWidget {
         this.updateStatus('Processing...', 'processing');
         
         try {
-            const data = await this.sendMessage('conversation/process', {
-                text: text,
-                language: 'en'
-            });
-            console.log('Conversation response:', data);
+            // Use assist_pipeline/run with intent stage for text input
+            this.pipelineSubscriptionId = ++this.messageId;
             
-            // Extract response text
-            let responseText = 'No response';
-            if (data.response?.speech?.plain?.speech) {
-                responseText = data.response.speech.plain.speech;
-            } else if (data.response?.speech?.ssml?.speech) {
-                // Strip SSML tags
-                responseText = data.response.speech.ssml.speech.replace(/<[^>]*>/g, '');
+            const pipelineRequest = {
+                id: this.pipelineSubscriptionId,
+                type: 'assist_pipeline/run',
+                start_stage: 'intent',
+                end_stage: 'tts',
+                input: {
+                    text: text
+                }
+            };
+            
+            // Add pipeline ID if available
+            if (this.config.pipelineId) {
+                pipelineRequest.pipeline = this.config.pipelineId;
             }
             
-            this.displayResponse(responseText);
+            console.log('Running text pipeline:', pipelineRequest);
+            this.wsConnection.send(JSON.stringify(pipelineRequest));
             
-            // Play TTS if available
-            if (data.response?.speech?.plain?.speech) {
-                await this.generateAndPlayTTS(responseText);
-            }
+            // The events will be handled by handleEvent
             
         } catch (error) {
-            console.error('Conversation error:', error);
-            this.displayResponse('Sorry, there was an error processing your request.');
-        } finally {
+            console.error('Text input error:', error);
+            this.displayResponse('Sorry, there was an error processing your request: ' + error.message);
             this.isProcessing = false;
             this.updateStatus('Ready', 'connected');
         }

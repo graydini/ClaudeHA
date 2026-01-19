@@ -80,8 +80,36 @@ if (credentials.ha_url) {
 }
 
 // API endpoint to get configuration
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
     console.log('Config API called');
+    
+    // Fetch HA config to get uuid
+    if (credentials.ha_url && credentials.access_token) {
+        try {
+            const haConfigResponse = await fetch(credentials.ha_url + '/api/core/config', {
+                headers: {
+                    'Authorization': `Bearer ${credentials.access_token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (haConfigResponse.ok) {
+                const responseText = await haConfigResponse.text();
+                console.log('HA core config response text:', responseText);
+                try {
+                    const haConfig = JSON.parse(responseText);
+                    console.log('HA core config parsed:', JSON.stringify(haConfig, null, 2));
+                    console.log('HA UUID:', haConfig.uuid);
+                } catch (e) {
+                    console.log('Failed to parse HA core config JSON:', e.message);
+                }
+            } else {
+                console.log('Failed to fetch HA core config:', haConfigResponse.status, haConfigResponse.statusText);
+            }
+        } catch (error) {
+            console.log('Error fetching HA core config:', error.message);
+        }
+    }
+    
     res.json({
         options,
         credentials,
@@ -116,57 +144,141 @@ const server = http.createServer(app);
 
 // WebSocket proxy using ws library
 if (credentials.ha_url) {
-    const WebSocket = require('ws');
     const wsProxy = new WebSocket.Server({ server, path: '/ws/ha' });
     
     wsProxy.on('connection', (clientWs) => {
         console.log('WebSocket proxy connection established from client');
         
-        // Connect to HA WebSocket
+        // Connect to HA WebSocket (without token in URL - we'll handle auth properly)
         const targetUrl = credentials.ha_url.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/api/websocket';
         console.log('Connecting to HA WebSocket:', targetUrl);
         const targetWs = new WebSocket(targetUrl);
         
+        let haConnected = false;
+        let clientMessages = [];
+        
         targetWs.on('open', () => {
             console.log('Connected to HA WebSocket');
+            haConnected = true;
+            // Send any queued messages
+            while (clientMessages.length > 0) {
+                const msg = clientMessages.shift();
+                targetWs.send(msg);
+            }
         });
         
         // Forward messages from HA to client
-        targetWs.on('message', (data) => {
-            console.log('Forwarding message from HA to client:', data.toString());
-            clientWs.send(data);
+        targetWs.on('message', (data, isBinary) => {
+            // Handle binary audio data (for TTS streaming)
+            if (isBinary) {
+                console.log('Forwarding binary audio from HA, length:', data.length);
+                if (clientWs.readyState === WebSocket.OPEN) {
+                    clientWs.send(data);
+                }
+                return;
+            }
+            
+            const dataStr = data.toString();
+            console.log('Received from HA:', dataStr.substring(0, 200) + (dataStr.length > 200 ? '...' : ''));
+            
+            try {
+                const message = JSON.parse(dataStr);
+                
+                // Handle auth_required from HA - send our server-side token
+                if (message.type === 'auth_required') {
+                    console.log('HA requires auth, sending server-side access token');
+                    targetWs.send(JSON.stringify({
+                        type: 'auth',
+                        access_token: credentials.access_token
+                    }));
+                    // Don't forward auth_required to client - we handle it server-side
+                    return;
+                }
+                
+                // Forward auth_ok and auth_invalid to client so it knows the result
+                if (message.type === 'auth_ok') {
+                    console.log('HA auth successful, notifying client');
+                    clientWs.send(JSON.stringify({ type: 'auth_ok' }));
+                    return;
+                }
+                
+                if (message.type === 'auth_invalid') {
+                    console.log('HA auth failed:', message.message);
+                    clientWs.send(JSON.stringify({ type: 'auth_invalid', message: message.message }));
+                    return;
+                }
+            } catch (e) {
+                // Not JSON, just forward as-is
+            }
+            
+            // Forward all other messages to client
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(data);
+            }
         });
         
         // Forward messages from client to HA
-        clientWs.on('message', (data) => {
-            console.log('Forwarding message from client to HA:', data.toString());
-            if (targetWs.readyState === WebSocket.OPEN) {
-                targetWs.send(data);
+        clientWs.on('message', (data, isBinary) => {
+            // Handle binary audio data (for STT)
+            if (isBinary) {
+                console.log('Forwarding binary audio data to HA, length:', data.length);
+                if (haConnected && targetWs.readyState === WebSocket.OPEN) {
+                    targetWs.send(data);
+                }
+                return;
+            }
+            
+            const dataStr = data.toString();
+            console.log('Received from client:', dataStr);
+            
+            try {
+                const message = JSON.parse(dataStr);
+                
+                // Client sends auth but we already handled it server-side, ignore
+                if (message.type === 'auth') {
+                    console.log('Ignoring client auth message (handled server-side)');
+                    return;
+                }
+            } catch (e) {
+                // Not JSON
+            }
+            
+            // Forward to HA if connected, otherwise queue
+            if (haConnected && targetWs.readyState === WebSocket.OPEN) {
+                console.log('Forwarding to HA:', dataStr.substring(0, 100));
+                targetWs.send(dataStr);
+            } else {
+                console.log('HA not connected yet, queueing message. haConnected:', haConnected, 'readyState:', targetWs.readyState);
+                clientMessages.push(dataStr);
             }
         });
         
         targetWs.on('close', (code, reason) => {
-            console.log('HA WebSocket closed:', code, reason.toString());
-            clientWs.close(code, reason);
+            console.log('HA WebSocket closed:', code, reason ? reason.toString() : '');
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.close(code || 1000);
+            }
         });
         
         targetWs.on('error', (error) => {
             console.error('HA WebSocket error:', error);
-            clientWs.close(1006, 'Proxy error');
-        });
-        
-        clientWs.on('message', (data) => {
-            targetWs.send(data);
+            if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.close(1006, 'Proxy error');
+            }
         });
         
         clientWs.on('close', (code, reason) => {
-            console.log('Client WebSocket closed:', code, reason.toString());
-            targetWs.close(code, reason);
+            console.log('Client WebSocket closed:', code, reason ? reason.toString() : '');
+            if (targetWs.readyState === WebSocket.OPEN) {
+                targetWs.close(code || 1000);
+            }
         });
         
         clientWs.on('error', (error) => {
             console.error('Client WebSocket error:', error);
-            targetWs.close(1006, 'Client error');
+            if (targetWs.readyState === WebSocket.OPEN) {
+                targetWs.close(1006, 'Client error');
+            }
         });
     });
 }
