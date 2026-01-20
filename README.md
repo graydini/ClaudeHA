@@ -1,11 +1,10 @@
-# Home Assistant Voice Widget
+# Home Assistant Gaget (Hag)
 
-A self-contained voice assistant web interface that integrates with Home Assistant. It provides:
+Hag is a browser-facing media portal that receives browser audio/video and routes it to Home Assistant as a media target, while providing an assistant interaction surface.
 
-- **Voice Input**: Click-to-speak or wake word detection
-- **Text Input**: Type messages to the assistant
-- **TTS Playback**: Hear assistant responses
-- **Media Receiver**: Named target for media playback automation
+- **Media Receiver**: Receive browser audio/video and forward to Home Assistant
+- **Assistant Interface**: Send/receive assistant messages (text + TTS)
+- **Wake Word & Voice Input**: Optional wake-word detection and click-to-speak
 - **PWA Support**: Install as a desktop or mobile app
 
 ## Quick Start (Standalone Mode)
@@ -52,7 +51,7 @@ AccessToken=your-long-lived-access-token
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Device Name | Identifier for this widget in Home Assistant | "Voice Widget" |
+| Device Name | Identifier for this widget in Home Assistant | "Hag" |
 | Wake Word | Wake word model to use | "hey_jarvis" |
 | STT Timeout | Seconds to wait after last speech | 15 |
 
@@ -68,7 +67,7 @@ The widget uses these Home Assistant APIs:
 2. Click your profile (bottom left)
 3. Scroll to "Long-Lived Access Tokens"
 4. Click "Create Token"
-5. Give it a name (e.g., "Voice Widget")
+5. Give it a name (e.g., "Hag")
 6. Copy the token (it will only be shown once!)
 
 ## Features
@@ -105,7 +104,7 @@ The widget uses these Home Assistant APIs:
 ## Project Structure
 
 ```
-home-assistant-voice-widget/
+home-assistant-gaget/
 ├── config.yaml          # Home Assistant add-on configuration
 ├── Dockerfile           # Container build file
 ├── package.json         # Node.js dependencies
@@ -182,7 +181,7 @@ Expected output:
 
 MIT License
 
-Copyright (c) 2024 Home Assistant Voice Widget
+Copyright (c) 2026 Home Assistant Gaget (Hag)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

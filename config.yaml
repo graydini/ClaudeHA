@@ -1,8 +1,8 @@
 # Home Assistant Add-on Configuration
-name: "Home Assistant Voice Widget"
-description: "A self-contained voice assistant web interface with wake word detection, STT/TTS integration, and media receiver functionality"
+name: "Home Assistant Gaget"
+description: "Hag — browser-facing media portal and assistant target for Home Assistant"
 version: "1.0.0"
-slug: "home_assistant_voice_widget"
+slug: "home_assistant_gaget"
 init: false
 arch:
   - amd64
@@ -15,12 +15,12 @@ boot: auto
 ingress: true
 ingress_port: 8099
 ingress_entry: /
-panel_icon: mdi:microphone-message
-panel_title: Voice Widget
+panel_icon: mdi:cast
+panel_title: Hag
 homeassistant_api: true
 auth_api: true
 options:
-  device_name: "Voice Widget"
+  device_name: "Hag"
   wake_word: "hey_jarvis"
   stt_timeout: 15
   auto_start_listening: false

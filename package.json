@@ -1,7 +1,8 @@
 {
-  "name": "home-assistant-voice-widget",
+  "name": "home-assistant-gaget",
+  "displayName": "Home Assistant Gaget (Hag)",
   "version": "1.0.0",
-  "description": "Home Assistant Voice Assistant Widget with Wake Word Detection",
+  "description": "Hag — browser-facing media portal and assistant target for Home Assistant",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

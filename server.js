@@ -11,7 +11,7 @@ const PORT = process.env.INGRESS_PORT || 8099;
 
 // Get options from Home Assistant add-on config or environment
 let options = {
-    device_name: 'Voice Widget',
+    device_name: 'Hag',
     wake_word: 'hey_jarvis',
     stt_timeout: 15,
     auto_start_listening: false
@@ -286,7 +286,7 @@ if (credentials.ha_url) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Voice Widget server running on port ${PORT}`);
+    console.log(`Hag server running on port ${PORT}`);
 });
 
 server.on('error', (error) => {

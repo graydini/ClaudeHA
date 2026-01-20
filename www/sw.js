@@ -97,7 +97,7 @@ self.addEventListener('push', (event) => {
         };
         
         event.waitUntil(
-            self.registration.showNotification(data.title || 'Voice Widget', options)
+            self.registration.showNotification(data.title || 'Hag', options)
         );
     }
 });
