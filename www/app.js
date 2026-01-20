@@ -35,6 +35,11 @@ class VoiceAssistantWidget {
         // DOM Elements
         this.elements = {};
         
+        // Response progress tracking
+        this.currentResponseText = '';
+        // Track last TTS URL to avoid duplicate playback
+        this.lastTtsUrl = null;
+        
         // Initialize
         this.init();
     }
@@ -384,6 +389,30 @@ class VoiceAssistantWidget {
         const event = message.event;
         console.log('Pipeline event:', event.type, event);
         
+        // Progressive response: update UI as intent text arrives (some assistants send partial/cumulative text)
+        if (event.data?.intent_output?.response?.speech?.plain?.speech) {
+            this.currentResponseText = event.data.intent_output.response.speech.plain.speech;
+            this.displayResponse(this.currentResponseText);
+        }
+        // Handle incremental intent progress events (many pipelines send 'intent-progress' with chat_log_delta)
+        if (event.type === 'intent-progress' && event.data?.chat_log_delta?.content) {
+            // Append delta content to the running response and update UI
+            this.currentResponseText += event.data.chat_log_delta.content;
+            this.displayResponse(this.currentResponseText);
+        }
+        
+        // Play TTS URL immediately if present in any event, but avoid replaying same URL
+        if (event.data?.tts_output?.url) {
+            const url = event.data.tts_output.url;
+            if (url !== this.lastTtsUrl) {
+                console.log('Received new TTS URL in event, playing immediately');
+                this.lastTtsUrl = url;
+                this.playTTS(url);
+            } else {
+                console.log('Received duplicate TTS URL, ignoring');
+            }
+        }
+        
         if (event.type === 'run-start') {
             // Extract the binary handler ID for audio streaming
             if (event.data?.runner_data?.stt_binary_handler_id !== undefined) {
@@ -419,6 +448,9 @@ class VoiceAssistantWidget {
             }
             this.stopAudioStreaming();
         } else if (event.type === 'intent-start') {
+            // Clear any previous progressive response text
+            this.currentResponseText = '';
+            this.displayResponse('');
             this.updateStatus('Understanding...', 'processing');
         } else if (event.type === 'intent-end') {
             if (event.data?.intent_output?.response?.speech?.plain?.speech) {
@@ -861,11 +893,41 @@ class VoiceAssistantWidget {
     playTTS(url) {
         // Construct full URL if relative
         const fullUrl = url.startsWith('http') ? url : `${this.config.haUrl}${url}`;
-        
-        this.elements.ttsAudio.src = fullUrl;
-        this.elements.ttsAudio.play().catch(err => {
-            console.error('TTS playback error:', err);
-        });
+        console.log('playTTS: playing URL', fullUrl);
+
+        // If this URL is already playing or loading, avoid reloading
+        if (this.lastTtsUrl === url) {
+            if (!this.elements.ttsAudio.paused) {
+                console.log('playTTS: same URL already playing, ignoring');
+                return;
+            }
+            // If not playing but src already set to same URL, attempt to resume
+            if (this.elements.ttsAudio.src && this.elements.ttsAudio.src === fullUrl) {
+                console.log('playTTS: resuming existing audio src');
+                this.elements.ttsAudio.play().catch(err => console.error('TTS playback error:', err));
+                return;
+            }
+        }
+
+        // Add basic playback instrumentation
+        this.elements.ttsAudio.oncanplay = () => console.log('TTS audio canplay');
+        this.elements.ttsAudio.onplaying = () => console.log('TTS audio playing');
+        this.elements.ttsAudio.onerror = (e) => console.error('TTS audio error', e);
+        this.elements.ttsAudio.onended = () => {
+            console.log('TTS audio ended');
+            // Clear lastTtsUrl when playback finishes
+            this.lastTtsUrl = null;
+        };
+
+        // Set source and play
+        try {
+            this.elements.ttsAudio.src = fullUrl;
+            this.elements.ttsAudio.play().catch(err => {
+                console.error('TTS playback error:', err);
+            });
+        } catch (err) {
+            console.error('playTTS unexpected error:', err);
+        }
     }
     
     saveDeviceName() {
