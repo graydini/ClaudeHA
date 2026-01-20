@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM alpine:latest
 
 # Install Node.js
 RUN apk add --no-cache nodejs npm

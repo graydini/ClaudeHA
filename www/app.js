@@ -24,7 +24,7 @@ class VoiceAssistantWidget {
             haUrl: '',
             accessToken: '',
             deviceName: 'Voice Widget',
-            wakeWord: 'hey_gadget',
+            wakeWord: 'computer',
             sttTimeout: 15,
             pipelineId: null
         };
@@ -984,7 +984,9 @@ class VoiceAssistantWidget {
                 this.wakeWordDetector = new WakeWordEngine({
                     baseAssetUrl: '/openwakeword/models',
                     keywords: [this.config.wakeWord],
-                    detectionThreshold: 0.5
+                    detectionThreshold: 0.2,
+                    vadThreshold: 0.2,
+                    cooldownMs: 1000
                 });
                 await this.wakeWordDetector.load();
                 this.wakeWordDetector.on('detect', ({ keyword }) => {

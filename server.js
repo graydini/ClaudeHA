@@ -12,7 +12,7 @@ const PORT = process.env.INGRESS_PORT || 8099;
 // Get options from Home Assistant add-on config or environment
 let options = {
     device_name: 'Hag',
-    wake_word: 'hey_gadget',
+    wake_word: 'computer',
     stt_timeout: 15,
     auto_start_listening: false
 };
@@ -258,7 +258,8 @@ if (credentials.ha_url) {
         targetWs.on('close', (code, reason) => {
             console.log('HA WebSocket closed:', code, reason ? reason.toString() : '');
             if (clientWs.readyState === WebSocket.OPEN) {
-                clientWs.close(code || 1000);
+                const validCode = (typeof code === 'number' && code >= 1000 && code <= 4999) ? code : 1000;
+                clientWs.close(validCode, reason);
             }
         });
         
@@ -272,7 +273,8 @@ if (credentials.ha_url) {
         clientWs.on('close', (code, reason) => {
             console.log('Client WebSocket closed:', code, reason ? reason.toString() : '');
             if (targetWs.readyState === WebSocket.OPEN) {
-                targetWs.close(code || 1000);
+                const validCode = (typeof code === 'number' && code >= 1000 && code <= 4999) ? code : 1000;
+                targetWs.close(validCode, reason);
             }
         });
         

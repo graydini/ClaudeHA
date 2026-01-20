@@ -68,7 +68,7 @@ AccessToken=your-long-lived-access-token
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Device Name | Identifier for this widget in Home Assistant | "Hag" |
-| Wake Word | Wake word model to use | "hey_gadget" |
+| Wake Word | Wake word model to use | "computer" |
 | STT Timeout | Seconds to wait after last speech | 15 |
 
 ### Home Assistant Configuration

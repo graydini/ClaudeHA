@@ -9,6 +9,7 @@ export const MODEL_FILE_MAP = {
     hey_rhasspy: 'hey_rhasspy_v0.1.onnx',
     timer: 'timer_v0.1.onnx',
     weather: 'weather_v0.1.onnx',
+    computer: 'computer_v2.onnx',
 };
 
 const AUDIO_PROCESSOR = `
@@ -55,15 +56,16 @@ const createEmitter = () => {
 
 export class WakeWordEngine {
     constructor({
-        keywords = ['hey_gadget'],
+        keywords = ['computer'],
         modelFiles = MODEL_FILE_MAP,
         baseAssetUrl = '/models',
         ortWasmPath,
         frameSize = 1280,
         sampleRate = 16000,
         vadHangoverFrames = 12,
-        detectionThreshold = 0.5,
-        cooldownMs = 2000,
+        detectionThreshold = 0.2,
+        vadThreshold = 0.2,
+        cooldownMs = 1000,
         executionProviders = ['wasm'],
         embeddingWindowSize = 16,
         debug = false
@@ -75,6 +77,7 @@ export class WakeWordEngine {
             frameSize,
             sampleRate,
             vadHangoverFrames,
+            vadThreshold,
             detectionThreshold,
             cooldownMs,
             executionProviders,
@@ -308,7 +311,7 @@ export class WakeWordEngine {
             this._vadState.c = res.cn;
             const confidence = res.output.data[0];
             this._debug('VAD result', { confidence: Number(confidence.toFixed(3)) });
-            return confidence > 0.5;
+            return confidence > this.config.vadThreshold;
         } catch (err) {
             this._emitter.emit('error', err);
             return false;
