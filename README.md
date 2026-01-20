@@ -34,7 +34,23 @@ Hag is a browser-facing media portal that receives browser audio/video and route
 
 ## Installing as Home Assistant Add-on
 
-When installed as a Home Assistant add-on, the widget automatically receives credentials from Home Assistant and doesn't require manual configuration.
+You can install this project as a Home Assistant add-on (development or from a Git repository). The add-on slug is `home_assistant_gaget` and the display name is **Home Assistant Gaget (Hag)**. The add-on uses Ingress (configured on port 8099) so the UI is available from the Supervisor Add-on page or the sidebar after installation.
+
+Two common installation methods:
+
+1. Local development install (recommended for testing):
+   - Copy the repository to your Home Assistant host under `/addons/local/home_assistant_gaget` (use the folder name exactly `home_assistant_gaget`).
+   - In Home Assistant, go to **Supervisor → Add-on store → three-dots menu → Reload**. The add-on will appear in the local add-ons list.
+   - Install the add-on, set options if needed (device_name, wake_word, stt_timeout, auto_start_listening), and click **Start**. Use **Open Web UI** to open the widget (or use ingress from the sidebar).
+
+2. Install from a GitHub repository (recommended for sharing):
+   - In Home Assistant, go to **Supervisor → Add-on store → Repositories** and **Add** your repository URL, for example `https://github.com/graydini/home-assistant-gaget`.
+   - Find **Home Assistant Gaget** in the Add-on store, install it, configure options, and start it. Use **Open Web UI** to access the widget (ingress will route to the app).
+
+Notes:
+- Because `ingress: true` is enabled in `config.yaml`, the add-on receives the required authentication context from Home Assistant; you should not need to provide `credentals.ini` when using the add-on.
+- Adjust options in the Add-on configuration UI or via the Supervisor API: `device_name`, `wake_word`, `stt_timeout`, and `auto_start_listening`.
+- For production deployments, run the add-on under HTTPS and ensure Home Assistant is up-to-date to get the latest security fixes.
 
 ## Configuration
 
@@ -80,7 +96,7 @@ The widget uses these Home Assistant APIs:
 
 ### Wake Word Detection
 - Uses OpenWakeWord (WASM) for browser-based wake word detection
-- Supported wake words: Hey Jarvis, Alexa, Hey Mycroft, Hey Rhasspy, Timer, Weather
+- Supported wake words: Hey Gadget, Hey Jarvis, Alexa, Hey Mycroft, Hey Rhasspy, Timer, Weather (default: Hey Gadget)
 - Enable via the toggle switch
 
 ### Media Player
@@ -176,6 +192,33 @@ Expected output:
 - Verify your Home Assistant has a voice assistant configured
 - Check the conversation integration is set up
 - Look at Home Assistant logs for errors
+
+### "git clone" / RPC failed / early EOF when installing add-on
+- Symptom: The Supervisor can fail while cloning with errors such as "RPC failed", "early EOF", or "unexpected disconnect while reading sideband packet". These failures can be caused by network/proxy issues or by repository problems such as accidental Git submodules or nested `.git` folders.
+
+Repository-side fix (what we did and expect contributors to follow):
+- We added a repository validation script and CI check to prevent submodule problems and to detect nested `.git` folders or gitlink entries that cause Supervisor to attempt recursive clones. The script is at `scripts/validate-repo.sh` and an Action runs it on push/PR: `.github/workflows/validate-repo.yml`.
+
+How to validate locally and fix a bad commit:
+1. Run the local validation script before pushing:
+```bash
+./scripts/validate-repo.sh
+```
+2. If the script finds a submodule or nested `.git`, remove the submodule and vendor the code instead (example for a path `ext/openwakeword`):
+```bash
+git submodule deinit -f -- ext/openwakeword
+git rm -f ext/openwakeword
+rm -rf .git/modules/ext/openwakeword
+# Copy or add the needed files directly under www/openwakeword then commit
+```
+3. Commit the removal and vendor the needed files in `www/openwakeword` (or use an npm dependency that is published on npm rather than a git submodule). Avoid committing `node_modules` or large built artifacts into the repo.
+
+If you still see clone errors after ensuring there are no submodules, please open an issue with the output of `./scripts/validate-repo.sh` and the exact Supervisor clone log and we'll fix it immediately.
+# In Home Assistant: Supervisor → Add-on store → three-dots → Reload
+```
+6. Manual install alternative: clone the repository on a machine that can reach GitHub, then copy the files to the HA host under `/addons/local/home_assistant_gaget` (preserve folder name exactly), and reload Add-ons.
+
+If you want, I can add a small GitHub Action to produce `tar.gz` release artifacts automatically on push, or add explicit release zips so Supervisor can fetch an archive URL instead of performing a `git clone` — say which option you prefer.
 
 ## License
 

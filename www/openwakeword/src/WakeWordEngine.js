@@ -5,6 +5,7 @@ export const MODEL_FILE_MAP = {
     alexa: 'alexa_v0.1.onnx',
     hey_mycroft: 'hey_mycroft_v0.1.onnx',
     hey_jarvis: 'hey_jarvis_v0.1.onnx',
+    hey_gadget: 'hey_gaj_itt.onnx',
     hey_rhasspy: 'hey_rhasspy_v0.1.onnx',
     timer: 'timer_v0.1.onnx',
     weather: 'weather_v0.1.onnx',
@@ -54,7 +55,7 @@ const createEmitter = () => {
 
 export class WakeWordEngine {
     constructor({
-        keywords = ['hey_jarvis'],
+        keywords = ['hey_gadget'],
         modelFiles = MODEL_FILE_MAP,
         baseAssetUrl = '/models',
         ortWasmPath,

@@ -24,7 +24,7 @@ class VoiceAssistantWidget {
             haUrl: '',
             accessToken: '',
             deviceName: 'Voice Widget',
-            wakeWord: 'hey_jarvis',
+            wakeWord: 'hey_gadget',
             sttTimeout: 15,
             pipelineId: null
         };

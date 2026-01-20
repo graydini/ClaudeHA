@@ -1,0 +1,17 @@
+name: Repo validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run repo validation
+        run: |
+          chmod +x scripts/validate-repo.sh
+          ./scripts/validate-repo.sh

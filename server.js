@@ -12,7 +12,7 @@ const PORT = process.env.INGRESS_PORT || 8099;
 // Get options from Home Assistant add-on config or environment
 let options = {
     device_name: 'Hag',
-    wake_word: 'hey_jarvis',
+    wake_word: 'hey_gadget',
     stt_timeout: 15,
     auto_start_listening: false
 };

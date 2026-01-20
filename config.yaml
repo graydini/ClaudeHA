@@ -21,7 +21,7 @@ homeassistant_api: true
 auth_api: true
 options:
   device_name: "Hag"
-  wake_word: "hey_jarvis"
+  wake_word: "hey_gadget"
   stt_timeout: 15
   auto_start_listening: false
 schema:
